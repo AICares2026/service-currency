@@ -1,0 +1,20 @@
+service:
+  name: currency
+image:
+  repository: 952893849914.dkr.ecr.us-east-1.amazonaws.com/aicares-application/currency
+containerPort: 7001
+resources:
+  limits:
+    memory: "20Mi"
+  requests:
+    memory: "10Mi"
+    cpu: "50m"
+env:
+  - name: CURRENCY_PORT
+    value: "7001"
+  - name: OTEL_SERVICE_NAME
+    value: "currency"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector:4317"
+nodeSelector:
+  eks.amazonaws.com/nodegroup: graviton-workers
