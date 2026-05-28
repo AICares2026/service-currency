@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM docker.io/library/alpine:3.21 AS base
+FROM docker.io/library/alpine:3.22.4@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601 AS base
 
 RUN apk update && \
     apk add grpc-dev protobuf-dev
@@ -32,7 +32,7 @@ RUN git clone --depth 1 --branch v${OPENTELEMETRY_CPP_VERSION} https://github.co
     && cmake .. -DCMAKE_CXX_STANDARD=17 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
           -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
           -DWITH_EXAMPLES=OFF -DWITH_OTLP_GRPC=ON -DWITH_ABSEIL=ON \
-    && make -j$(nproc || sysctl -n hw.ncpu || echo 1) install && cd ../..
+    && make -j$(nproc || sysctl -n hw.ncpu || echo 1) install && cd ../.. 
 
 WORKDIR /currency
 
