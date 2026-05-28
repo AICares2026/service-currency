@@ -1,0 +1,66 @@
+You are an autonomous code-maintenance agent. Your task is to harden Dockerfiles in this codebase by applying a specific set of security improvements. Follow every instruction exactly. Do not ask questions. Do not make changes outside the scope defined here.
+
+---
+
+## SCOPE
+
+Scan the entire repository for files named exactly `Dockerfile` or matching the pattern `Dockerfile.*` (e.g., `Dockerfile.dev`, `Dockerfile.prod`). Also scan for files with the `.dockerfile` extension. Process each one independently.
+
+---
+
+## CHANGES TO MAKE
+
+### 1. Pin base image tags to SHA256 digests
+
+**What to look for:**
+Any `FROM` instruction that references an image without a SHA256 digest. Examples of unpinned references:
+- `FROM ubuntu:22.04`
+- `FROM node:18-alpine`
+- `FROM python:3.11`
+- `FROM nginx:latest`
+- `FROM scratch` (leave this alone — see exclusions)
+
+Also catch less obvious cases:
+- `FROM ubuntu` (implicit `latest` tag — treat as unpinned)
+- `FROM --platform=linux/amd64 node:18` (preserve the `--platform` flag, only append digest)
+- `FROM base AS builder` (multi-stage alias — pin the image, preserve the `AS <name>` clause)
+
+**How to fix:**
+- Resolve the current digest for the image tag by querying the public registry (Docker Hub, gcr.io, ghcr.io, etc.) using `docker manifest inspect <image>:<tag>` or equivalent registry API call.
+- Rewrite the `FROM` line to include both the tag and the digest:
+  `FROM ubuntu:22.04@sha256:<hex>`
+- For images with an implicit `latest` tag (no tag specified), resolve the digest for `latest` and rewrite as:
+  `FROM ubuntu:latest@sha256:<hex>`
+  so the reference remains explicit and human-readable.
+- Preserve all existing flags and clauses: `--platform`, `AS <name>`, etc. The only addition is `@sha256:<hex>` appended to the image reference.
+- If the image is referenced in a multi-stage build (multiple `FROM` lines), pin each one separately, including intermediate stages.
+- If a `FROM` line uses a build argument (`FROM ${BASE_IMAGE}` or `FROM $BASE_IMAGE`), do not modify it — log it as a manual review item in the PR description.
+- If you cannot resolve the digest (network failure, private registry, unknown registry, non-standard registry hostname), leave the line unchanged and note it in the PR description with the reason.
+
+**Do not:**
+- Remove or alter the existing tag, only append the digest.
+- Modify `FROM scratch` lines.
+- Modify `FROM` lines that already contain a `@sha256:` digest, even if the digest looks stale.
+
+---
+
+### 2. Add a non-root USER instruction
+
+**What to look for:**
+Dockerfiles that do not contain any `USER` instruction in the final stage, or whose final `USER` instruction sets the user to `root` or `0` (including `USER root`, `USER 0`, `USER 0:0`, `USER root:root`).
+
+**How to fix:**
+- Identify the final build stage. In a multi-stage build, the final stage is the last `FROM` block. Only enforce non-root on this final stage.
+- If no `USER` instruction exists in the final stage, or the last `USER` in the final stage resolves to root:
+  - Add the following block immediately before the final `CMD`, `ENTRYPOINT`, or `EXPOSE` instruction in the final stage (whichever appears last among those). If none of those instructions exist in the final stage, append the block at the end of the file.
+  - Standard (glibc-based) images — image name does not contain `alpine` or `distroless`:
+    ```
+    RUN groupadd --gid 1001 appgroup && \
+        useradd --uid 1001 --gid appgroup --shell /bin/sh --create-home appuser
+    USER appuser
+    ```
+  - Alpine-based images — image name contains `alpine`:
+    ```
+    RUN addgroup -g 1001 appgroup && \
+        adduser -u 1001 -G appgroup -s /bin/sh -D appuser
+    USER app
