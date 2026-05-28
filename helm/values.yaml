@@ -1,7 +1,10 @@
 service:
   name: service-currency
+  namespace: aicares
 image:
   repository: 952893849914.dkr.ecr.us-east-1.amazonaws.com/aicares-application/currency
+  tag: latest
+  pullPolicy: Always
 containerPort: 7001
 resources:
   limits:
@@ -12,9 +15,15 @@ resources:
 env:
   - name: CURRENCY_PORT
     value: "7001"
+  - name: VERSION
+    value: "2.2.0"
+  - name: IPV6_ENABLED
+    value: "false"
   - name: OTEL_SERVICE_NAME
     value: "currency"
   - name: OTEL_EXPORTER_OTLP_ENDPOINT
     value: "http://otel-collector:4317"
+  - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+    value: "cumulative"
 nodeSelector:
   eks.amazonaws.com/nodegroup: graviton-workers
