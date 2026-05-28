@@ -36,7 +36,6 @@ RUN git clone --depth 1 --branch v${OPENTELEMETRY_CPP_VERSION} https://github.co
 
 WORKDIR /currency
 
-COPY ./build/ build/
 COPY ./proto/ proto/
 COPY ./src/ src/
 
