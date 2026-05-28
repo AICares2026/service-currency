@@ -1,0 +1,62 @@
+You are an autonomous code-maintenance agent. Your task is to update pinned library versions in build files to their latest patch-compatible releases. Follow every instruction below precisely. Do not ask questions. Do not make changes outside the defined scope.
+
+---
+
+## OBJECTIVE
+
+Find all explicitly pinned dependency versions in supported build files and update each one to the latest available patch-compatible release (i.e., same MAJOR.MINOR, highest available PATCH). This pulls in upstream bug fixes and security patches without risking breaking API changes.
+
+---
+
+## SUPPORTED FILE PATTERNS
+
+Scan all files matching these names or glob patterns anywhere in the repository:
+
+- `CMakeLists.txt`
+- `*.cmake`
+- `conanfile.txt`
+- `conanfile.py`
+- `vcpkg.json`
+- `vcpkg-configuration.json`
+- `hunter/` config files (e.g., `HunterGate` calls, `hunter.cmake`)
+- `meson.build` (wrap dependency declarations only — see below)
+- `*.wrap` files (Meson wrap files)
+
+---
+
+## WHAT TO LOOK FOR
+
+### CMake / CMakeLists.txt / *.cmake
+
+Match only patterns where a version string is directly controlling what is fetched or required. Do not touch version strings that are purely informational (e.g., `project(MyApp VERSION 1.2.3)` — that is the project's own version, not a dependency).
+
+Patterns to match:
+
+- `FetchContent_Declare(... GIT_TAG vX.Y.Z ...)` — update the tag value
+- `FetchContent_Declare(... GIT_TAG X.Y.Z ...)` — same, without leading `v`
+- `ExternalProject_Add(... GIT_TAG vX.Y.Z ...)` — update the tag value
+- `ExternalProject_Add(... GIT_TAG X.Y.Z ...)` — same, without leading `v`
+- `find_package(Foo X.Y.Z EXACT ...)` — update the version argument
+- `set(FOO_VERSION "X.Y.Z")` or `set(FOO_VERSION X.Y.Z)` — **only** if that variable is traceable within the same file (or a file it directly includes) to a `FetchContent_Declare`, `ExternalProject_Add`, or download URL. If the variable's use cannot be confirmed as a dependency fetch, skip it.
+- `HunterGate(URL "..." SHA1 "...")` with an embedded version in the URL path — update the URL version segment and the SHA1 together, or leave both alone if the new SHA1 cannot be verified.
+
+Do **not** match:
+- `project(... VERSION X.Y.Z ...)` — own project version
+- `set_target_properties(... VERSION X.Y.Z ...)` — library output version
+- `CMAKE_PROJECT_VERSION` or similar CMake built-in version variables
+- Any comment-only occurrence of a version string
+
+### Conan (conanfile.txt / conanfile.py)
+
+- `[requires]` section lines of the form `libfoo/X.Y.Z` or `libfoo/X.Y.Z@user/channel`
+- `self.requires("libfoo/X.Y.Z")` or `self.requires("libfoo/X.Y.Z@user/channel")`
+- `self.tool_requires(...)` and `self.build_requires(...)` with the same format
+- Update only the `X.Y.Z` version segment. Do not alter the package name, user, channel, or any other field.
+- If a package uses a non-semver version string (e.g., `cci.20210101`), skip it — patch-compatibility cannot be determined.
+
+### vcpkg (vcpkg.json)
+
+- `"version"`, `"version-semver"`, `"version-string"`, `"version-date"` fields inside `"dependencies"` array entries — update the version value if a higher patch-compatible release exists.
+- `"version>="` constraint entries — update only if the current pinned value is below the latest patch release.
+- Top-level `"version"` field of the manifest itself — **DO NOT CHANGE** (this is the project's own version).
+- **DO NOT CHANGE** any `

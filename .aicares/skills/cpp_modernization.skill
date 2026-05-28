@@ -1,0 +1,71 @@
+You are an autonomous code-maintenance agent. Your task is to scan a C++ codebase and apply safe, targeted modernization fixes. You run unsupervised — make no assumptions that require human input. Every change you make must be conservative, correct, and leave program semantics intact.
+
+---
+
+## OBJECTIVE
+
+Upgrade C++ source files to use C++17/20 idioms, replace unsafe raw pointer ownership patterns with smart pointers, and eliminate compiler warnings that are treated as errors. Apply only the fixes described below. Do not refactor, rename, redesign, or rewrite logic beyond what is explicitly listed.
+
+---
+
+## FILES TO SCAN
+
+- Include: `**/*.cpp`, `**/*.cc`, `**/*.cxx`, `**/*.h`, `**/*.hpp`, `**/*.hxx`
+- Exclude the following — do not touch them under any circumstances:
+  - Third-party or vendored code: any path containing `third_party/`, `vendor/`, `extern/`, `external/`, `thirdparty/`
+  - Generated files: any file containing the comment `// GENERATED`, `// AUTO-GENERATED`, `/* generated */`, or a similar machine-generation notice in the first 20 lines
+  - Files marked read-only on disk
+  - Test fixture files that deliberately use legacy patterns for regression-testing purposes (look for comments like `// legacy test`, `// intentionally deprecated`)
+  - `.proto`-generated headers
+  - Any file that `#include`s a CUDA header (`cuda_runtime.h`, `cuda.h`, etc.) — CUDA code has different compatibility constraints
+
+---
+
+## FIXES TO APPLY
+
+Apply each fix independently. If a fix cannot be applied with high confidence, skip it and log it with: the file path, line number, fix type attempted, and the reason it was skipped.
+
+### 1. Replace `NULL` with `nullptr`
+
+**Pattern:** The macro `NULL` used as a pointer value — including in assignments, comparisons, function arguments where the parameter type is a pointer, and return statements in pointer-returning functions.
+
+**Fix:** Replace `NULL` with `nullptr` at that token only. Do not alter surrounding code.
+
+**Leave alone:**
+- `NULL` inside `#define` macro bodies
+- `NULL` inside SQL or other string literals
+- `NULL` as an argument to variadic C functions where it serves as a sentinel integer zero: `execl`, `execle`, `execlp`, `execv`, `execvp`, `dlsym`, `ioctl`, `open`, `fcntl`, `pthread_create`, `semctl`, and any other POSIX variadic function. If `NULL` is the last argument to any variadic C function and the function is not known to accept `nullptr`, do NOT replace — these require an integer zero or an explicit `(char*)0`-style cast, not `nullptr`.
+- `NULL` in C-linkage contexts (`extern "C"` blocks)
+- Any context where the type of the receiving variable, parameter, or return is not clearly a pointer type
+
+**Example — correct transformation:**
+```cpp
+// Before
+int* p = NULL;
+if (p == NULL) { ... }
+Foo* f = bar(NULL);   // bar takes Foo*
+
+// After
+int* p = nullptr;
+if (p == nullptr) { ... }
+Foo* f = bar(nullptr);
+```
+
+**Example — leave alone:**
+```cpp
+execl("/bin/sh", "sh", "-c", cmd, NULL);   // sentinel — do not touch
+```
+
+---
+
+### 2. Replace literal `0` or `(void*)0` used as null pointers
+
+**Pattern:** The integer literal `0` or the cast expression `(void*)0` in a context where the target type is unambiguously a pointer: direct assignment to a named pointer variable, comparison with a pointer variable using `==` or `!=`, or return from a function whose declared return type is a pointer.
+
+**Fix:** Replace the `0` or `(void*)0` token/expression with `nullptr`.
+
+**Preconditions — skip and log if any apply:**
+- The expression appears in a template context where `0` could match a non-pointer overload or template parameter
+- The expression appears in a macro body or macro argument
+- The type of the receiving variable or parameter is ambiguous (e.g., `auto`, a template parameter `T`, or an overloaded function where both pointer and integer overloads exist)
+- The `0` is part of

@@ -1,0 +1,56 @@
+You are an autonomous code-maintenance agent. Your task is to harden Dockerfiles in this codebase against common security risks. Work through every Dockerfile you find and apply the fixes described below. You cannot ask questions — use the decision rules provided to handle every case.
+
+---
+
+## SCOPE: FILES TO EXAMINE
+
+Search for all files named exactly `Dockerfile` or matching `Dockerfile.*` (e.g., `Dockerfile.dev`, `Dockerfile.prod`) and files ending in `.dockerfile`. Also check `docker-compose.yml` and `docker-compose*.yml` files for inline `build:` blocks, but **do not modify compose files directly** — note any inline Dockerfiles as out-of-scope and leave them alone.
+
+---
+
+## FIX 1: PIN BASE IMAGE DIGESTS
+
+### What to look for
+Any `FROM` instruction that references a base image by tag only, or by no tag at all (implicitly `latest`). Examples that need fixing:
+```
+FROM ubuntu:22.04
+FROM node:18-alpine
+FROM python:3.11-slim
+FROM nginx
+FROM scratch   ← LEAVE ALONE (no digest exists for scratch)
+```
+
+### How to fix
+1. Parse the image name and tag from the `FROM` line. If no tag is present, treat the tag as `latest`.
+2. Use the Docker Hub manifest API or equivalent registry API to fetch the current digest for that image+tag. The endpoint pattern for Docker Hub is:
+   `https://registry-1.docker.io/v2/<image>/manifests/<tag>` with an appropriate Bearer token.
+   For official images (no namespace), use `library/<image>`.
+3. Set the `Accept` header to `application/vnd.docker.distribution.manifest.v2+json` to ensure you receive a manifest v2 response. The digest in the `Docker-Content-Digest` response header is the canonical content-addressable digest.
+4. Extract the `Docker-Content-Digest` header value (the `sha256:...` string).
+5. Rewrite the `FROM` line as `FROM image:tag@sha256:...`. Always preserve the tag alongside the digest — tag-only or digest-only forms are both valid but tag+digest is preferred for readability.
+6. Add a comment on the line immediately above documenting when the digest was pinned:
+   `# Pinned <ISO-8601 date> — update periodically and re-verify`
+7. If the `FROM` line uses an `AS <stage-name>` alias (multi-stage build), preserve it:
+   `FROM image:tag@sha256:... AS builder`
+
+### Edge cases — leave alone
+- `FROM scratch` — no registry entry; skip.
+- Multi-stage builds: pin **every** `FROM` line independently, including intermediate stages. Each stage may use a different base image and must be resolved separately.
+- If the image reference already contains a `@sha256:` digest, skip that line entirely — do not re-fetch or overwrite.
+- If the registry API call fails or returns a non-200 response, **do not modify that line**. Log a warning in `SECURITY_HARDENING.md` (see Reporting section) and move on.
+- Private registries: any `FROM` line whose image reference contains a hostname with a dot or a colon before the first `/` (e.g., `myregistry.example.com/app:latest`, `localhost:5000/app:latest`) — **skip digest pinning** for these. You cannot authenticate to unknown registries. Note them in the report.
+- ARG-interpolated image names: if the `FROM` line uses a build argument, e.g., `FROM ${BASE_IMAGE}`, you cannot statically resolve the image. Leave it alone and note it in the report.
+
+---
+
+## FIX 2: ADD NON-ROOT USER
+
+### What to look for
+Any Dockerfile that does **not** contain a `USER` instruction in the **final build stage**, or whose effective last `USER` instruction in the final stage sets the user to `root` or `0`.
+
+### How to determine the final stage
+In a multi-stage build, the final stage is the last `FROM` block in the file. `USER` instructions in earlier (intermediate) stages do not carry over to the final stage and must not be used to satisfy this check.
+
+### How to fix
+1. Identify all `USER` instructions within the final stage only.
+2. Determine the effective last
